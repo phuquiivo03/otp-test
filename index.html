@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Firebase Phone OTP Authentication</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Use Inter font family */
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      /* Simple transition for interactive elements */
+      .btn {
+        transition: background-color 0.3s ease, transform 0.1s ease;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+      .btn:active {
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 flex items-center justify-center h-screen">
+    <div class="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg">
+      <h1 class="text-2xl font-bold text-center text-gray-800">
+        Phone Verification
+      </h1>
+      <p class="text-center text-gray-500">
+        Enter your phone number to receive a verification code.
+      </p>
+
+      <!-- Step 1: Phone Number Input -->
+      <div id="phone-input-section" class="space-y-4">
+        <div>
+          <label for="phone-number" class="text-sm font-medium text-gray-700"
+            >Phone Number</label
+          >
+          <input
+            type="tel"
+            id="phone-number"
+            class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="+84 123-456-789"
+          />
+        </div>
+        <!-- This container is required for the reCAPTCHA widget -->
+        <div id="recaptcha-container"></div>
+        <button
+          id="send-otp-btn"
+          class="w-full btn flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+        >
+          Gửi mã OTP
+        </button>
+      </div>
+
+      <!-- Step 2: OTP Input -->
+      <div id="otp-input-section" class="hidden space-y-4">
+        <div>
+          <label for="otp-code" class="text-sm font-medium text-gray-700"
+            >Verification Code</label
+          >
+          <input
+            type="text"
+            id="otp-code"
+            class="mt-1 block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="Nhập mã 6 chữ số"
+          />
+        </div>
+        <button
+          id="verify-otp-btn"
+          class="w-full btn flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          Xác thực mã
+        </button>
+      </div>
+
+      <!-- Status Messages -->
+      <div id="status-message" class="text-center text-sm font-medium"></div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <!-- You must use type="module" to use import statements -->
+    <script type="module">
+      // Import the functions you need from the SDKs you need
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+      import {
+        getAuth,
+        RecaptchaVerifier,
+        signInWithPhoneNumber,
+      } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+      // =================================================================================
+      // QUAN TRỌNG: Thay thế bằng cấu hình dự án Firebase của bạn
+      // LƯU Ý BẢO MẬT: KHÔNG chia sẻ công khai API Key của bạn.
+      // Tôi đã xóa API Key cũ của bạn. Bạn nên tạo một cái mới.
+      // =================================================================================
+      const firebaseConfig = {
+        apiKey: "AIzaSyDzdBCfUUcQKGFj_QC_3baxBybdj3N-nhI", // <-- THAY THẾ BẰNG API KEY MỚI CỦA BẠN
+        authDomain: "clinic-12371.firebaseapp.com", // <-- ĐÂY LÀ ĐỊNH DẠNG ĐÚNG
+        projectId: "clinic-12371",
+        storageBucket: "clinic-12371.appspot.com", // <-- Định dạng chuẩn
+        messagingSenderId: "636272500930",
+        appId: "1:636272500930:web:d8b8c0883a3fbed8fa9b5b",
+        measurementId: "G-F03KT504RJ",
+      };
+      // =================================================================================
+
+      // Initialize Firebase
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+
+      // --- DOM Elements ---
+      const phoneInputSection = document.getElementById("phone-input-section");
+      const otpInputSection = document.getElementById("otp-input-section");
+      const phoneNumberInput = document.getElementById("phone-number");
+      const sendOtpBtn = document.getElementById("send-otp-btn");
+      const otpCodeInput = document.getElementById("otp-code");
+      const verifyOtpBtn = document.getElementById("verify-otp-btn");
+      const statusMessage = document.getElementById("status-message");
+
+      // This object will hold the confirmation result
+      let confirmationResult = null;
+
+      // --- Functions ---
+
+      /**
+       * Renders the reCAPTCHA widget.
+       */
+      function setupRecaptcha() {
+        try {
+          window.recaptchaVerifier = new RecaptchaVerifier(
+            auth,
+            "recaptcha-container",
+            {
+              size: "normal",
+              callback: (response) => {
+                console.log("reCAPTCHA solved");
+              },
+              "expired-callback": () => {
+                updateStatus(
+                  "reCAPTCHA đã hết hạn. Vui lòng thử lại.",
+                  "text-red-500"
+                );
+              },
+            }
+          );
+          window.recaptchaVerifier.render();
+          console.log("reCAPTCHA rendered.");
+        } catch (error) {
+          console.error("Error setting up reCAPTCHA:", error);
+          updateStatus(
+            "Không thể khởi tạo reCAPTCHA. Vui lòng tải lại trang.",
+            "text-red-500"
+          );
+        }
+      }
+
+      /**
+       * Updates the status message div with a message and color.
+       */
+      function updateStatus(message, colorClass) {
+        statusMessage.textContent = message;
+        statusMessage.className = `text-center text-sm font-medium ${colorClass}`;
+      }
+
+      /**
+       * Handles the sending of the OTP to the user's phone number.
+       */
+      async function sendOtp() {
+        const phoneNumber = phoneNumberInput.value;
+        if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber)) {
+          updateStatus(
+            "Vui lòng nhập số điện thoại hợp lệ theo định dạng E.164 (ví dụ: +84123456789).",
+            "text-red-500"
+          );
+          return;
+        }
+
+        updateStatus("Đang gửi OTP...", "text-gray-500");
+        const appVerifier = window.recaptchaVerifier;
+
+        try {
+          confirmationResult = await signInWithPhoneNumber(
+            auth,
+            phoneNumber,
+            appVerifier
+          );
+          console.log(confirmationResult);
+          updateStatus(
+            "Đã gửi OTP thành công! Vui lòng kiểm tra điện thoại.",
+            "text-green-500"
+          );
+          phoneInputSection.classList.add("hidden");
+          otpInputSection.classList.remove("hidden");
+        } catch (error) {
+          console.error("Error sending OTP:", error);
+          updateStatus(`Lỗi: ${error.message}`, "text-red-500");
+          window.recaptchaVerifier.render();
+        }
+      }
+
+      /**
+       * Verifies the OTP code entered by the user.
+       */
+      async function verifyOtp() {
+        const code = otpCodeInput.value;
+        if (!code || code.length !== 6) {
+          updateStatus("Vui lòng nhập mã 6 chữ số.", "text-red-500");
+          return;
+        }
+
+        if (!confirmationResult) {
+          updateStatus(
+            "Đã xảy ra lỗi. Vui lòng thử gửi lại OTP.",
+            "text-red-500"
+          );
+          return;
+        }
+
+        updateStatus("Đang xác thực mã...", "text-gray-500");
+
+        try {
+          const result = await confirmationResult.confirm(code);
+          const user = result.user;
+          console.log("User signed in:", user);
+          updateStatus(
+            "✅ Thành công! Số điện thoại đã được xác thực.",
+            "text-green-600 font-bold"
+          );
+          otpInputSection.classList.add("hidden");
+        } catch (error) {
+          console.error("Error verifying OTP:", error);
+          updateStatus("Mã không hợp lệ. Vui lòng thử lại.", "text-red-500");
+        }
+      }
+
+      // --- Event Listeners ---
+      sendOtpBtn.addEventListener("click", sendOtp);
+      verifyOtpBtn.addEventListener("click", verifyOtp);
+
+      // --- Initialization ---
+      window.onload = setupRecaptcha;
+    </script>
+  </body>
+</html>
